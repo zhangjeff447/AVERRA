@@ -22,7 +22,7 @@ def main():
  modes=parser.add_mutually_exclusive_group(required=True)
  for name in ['check-config','download-history','validate-read-only','accept-local','live']:modes.add_argument('--'+name,action='store_true')
  args=parser.parse_args()
- from etf.cycle import POLICY,core_symbols
+ from etf.cycle import POLICY,account_symbols,authorize_order
  from etf.calendar import ET,scheduled,risk_session
  now=datetime.now(timezone.utc)
  # Gate before constructing an adapter or doing broker I/O.
@@ -32,14 +32,21 @@ def main():
  cfg_path=ROOT.parent/'config/runtime.json'
  if args.check_config:
   local=json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+  permissions={}
+  for symbol in account_symbols():
+   permissions[symbol]=[]
+   for side in ('BUY','SELL'):
+    try:authorize_order(symbol,side)
+    except ValueError:continue
+    permissions[symbol].append(side)
   effective=dict(POLICY,policy_hash=policy_hash,constituent_breadth=local.get('constituent_breadth'),
-                 permissions={**{s:['BUY'] for s in core_symbols()},'TQQQ':['BUY','SELL']})
+                 permissions=permissions)
   if POLICY.get('strategy_b_core_cash'):
    from etf.strategy_b_cash import FUNDING_MODE,rules
    cfg=rules()
    for key in ('targets','defensive_targets','core_targets','constituent_breadth'):
     effective.pop(key,None)
-   effective.update(permissions={'VOO':['BUY'],'SMH':['BUY'],'TQQQ':[]},funding_mode=FUNDING_MODE,
+   effective.update(funding_mode=FUNDING_MODE,
                     strategic_core_weights=cfg['strategic_core_weights'],core_floor=cfg['core_floor'],
                     state_cash_weights={k:v['new_core_cash'] for k,v in cfg['states'].items()},
                     tactical_target='0')
@@ -111,9 +118,17 @@ def main():
     proof=dict(status='PASS',at=datetime.now(timezone.utc).isoformat(),account_hash=cfg['account_hash'],policy_hash=policy_hash,baseline=baseline,order_schema_verified=True,broker_write_calls=0,implementation_hash=implementation_hash())
     evidence_path().parent.mkdir(exist_ok=True);evidence_path().write_text(json.dumps(proof,indent=2));evidence_path().chmod(0o600)
    result['run_at']=datetime.now(timezone.utc).isoformat()
+   if args.live:
+    # Reports read today's fills from the ledger, so a fill made by an earlier
+    # run in the same window is never shown as "WAIT, no trade".
+    from etf.runtime import day_fills
+    result['day_fills']=day_fills(j,now.astimezone(ET).date().isoformat())
    if args.live and risk_only and not result.get('executions') and not result.get('selected') and result.get('reason')=='WAIT_STOP_NOT_TRIGGERED':return 0
    if args.live:
-    if not risk_only:j.save(done_key,result)
+    if not risk_only:
+     from etf.notifications import window_fills
+     result.update(window=window,window_fills=window_fills(j,window))
+     j.save(done_key,result)
     from tools.ops_utils import append_jsonl
     append_jsonl(ROOT.parent/'logs/cycles.jsonl',result)
    print(report(result))
@@ -133,6 +148,10 @@ if __name__=='__main__':
   if '--live' in __import__('sys').argv:
    try:
     from etf.notifications import enqueue
-    enqueue(dict(selected=None,reason=error),None)
+    from etf.funds import PortfolioValuationMismatch
+    from etf.recovery import window_key
+    failed_at=datetime.now(timezone.utc)
+    window=window_key(failed_at) if isinstance(exc,PortfolioValuationMismatch) else None
+    enqueue(dict(selected=None,reason=error,run_at=failed_at.isoformat(),deferred_window=window),None)
    except Exception:pass
   raise SystemExit(2)

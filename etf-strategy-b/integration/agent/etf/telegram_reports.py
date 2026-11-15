@@ -62,7 +62,17 @@ REASONS = {
     'TREND_EXIT': '趋势退出',
     'HARVEST_ABOVE35_TO30': '超额减仓',
     'portfolio_value_unreconciled': '券商账户估值待对账',
+    'FILLED_VALUATION_PENDING': '已成交，券商估值稍后同步',
 }
+
+
+def day_fill_lines(result):
+    """Ledger fills of the day; shown when this run itself has no executions."""
+    if result.get('executions') or not result.get('day_fills'):
+        return []
+    parts = [('买入 ' if f['side']=='BUY' else '卖出 ') + f['symbol'] + ' ' + usd(f['gross'])
+             for f in result['day_fills']]
+    return ['今日已成交｜' + ' · '.join(parts)]
 EXECUTION_LABELS = {
     'SUBMITTED': '已提交 · 待成交',
     'OPEN': '已提交 · 待成交',
@@ -89,7 +99,7 @@ def reason_text(reason):
 
 
 def wait_reason(result):
-    if result.get('reason')=='WAIT_POLICY_OR_SESSION_USED' and result.get('cash_basis')=='VERIFIED_CURRENT':
+    if result.get('reason') in ('WAIT_POLICY_OR_SESSION_USED','WAIT_STRATEGY_B_CASH') and result.get('cash_basis')=='VERIFIED_CURRENT':
         try:
             cash,minimum=(Decimal(str(value)) for value in (result.get('safe_cash'),POLICY['broker_minimum']))
             if cash.is_finite() and 0<=cash<minimum:
@@ -107,7 +117,16 @@ def decision(result):
     if result.get('run_at'):
         header += '｜' + datetime.fromisoformat(result['run_at']).astimezone(ET).strftime('%H:%M ET')
     lines = [header]
-    if not executions:
+    fills = result.get('window_fills') or []
+    if not fills:
+        lines += day_fill_lines(result)
+    for fill in fills:
+        side = '买入' if fill['side']=='BUY' else '卖出'
+        lines.append(f"{side} {fill['symbol']} {usd(fill['gross'])} · 已成交")
+    if fills and not selected and (not executions or result.get('cash_basis')=='VERIFIED_CURRENT'
+                                  or reason=='FILLED_VALUATION_PENDING'):
+        lines.append('最终结果｜'+wait_reason(result))
+    if not executions and not fills:
         if selected:
             side = '买入' if selected['side']=='BUY' else '卖出'
             lines.append(f"计划{side} {selected['symbol']} {usd(selected.get('amount'))} · 尚未提交")
@@ -115,6 +134,9 @@ def decision(result):
             from .notifications import authorization_required
             lines.append('WAIT · Robinhood 授权待恢复' if authorization_required(reason) else 'WAIT · ' + wait_reason(result))
     for item in executions:
+        if item['execution']['status']=='FILLED' and any(
+                (f['symbol'],f['side'])==(item['plan']['symbol'],item['plan']['side']) for f in fills):
+            continue
         order, execution = item['plan'], item['execution']
         side = '买入' if order['side']=='BUY' else '卖出'
         status = execution['status']
@@ -126,7 +148,8 @@ def decision(result):
         if order.get('reason') in ('STOP_LOSS_6_6_ALL_TQQQ','TREND_EXIT','HARVEST_ABOVE35_TO30'):
             line += ' · ' + reason_text(order['reason'])
         lines.append(line)
-    if executions and reason in ('WAIT_PENDING_DEPOSIT','WAIT_PENDING_APPROVAL','BLOCKED_BY_UNRESOLVED_INTENT'):
+    if executions and (reason in ('WAIT_PENDING_DEPOSIT','WAIT_PENDING_APPROVAL','BLOCKED_BY_UNRESOLVED_INTENT')
+                       or (not fills and reason=='FILLED_VALUATION_PENDING')):
         lines.append(reason_text(reason))
     if reason == 'WAIT_PENDING_DEPOSIT':
         lines.append('待到账入金：'+usd(result.get('pending_external_credits'))+
@@ -147,13 +170,32 @@ INTRADAY_LABELS = {
 }
 
 
+def voo_fundamentals(path, day):
+    if path is None:
+        return None
+    try:
+        row = json.loads(path.with_name('voo-fundamentals.json').read_text())
+        as_of = date.fromisoformat(row['as_of'])
+        pe, pb = (Decimal(str(row[key])) for key in ('pe','pb'))
+        if (row['symbol'] == 'VOO' and row['provider'] == 'Vanguard'
+                and 0 <= (day-as_of).days <= 130
+                and all(value.is_finite() and value > 0 for value in (pe,pb))):
+            return f'VOO 官方估值｜市盈率 {pe:.1f}× · 市净率 {pb:.1f}×（{as_of:%Y-%m-%d}）'
+    except (OSError, ValueError, ArithmeticError, TypeError, KeyError):
+        pass
+    return None
+
+
 def valuation_reference(path, now):
-    unavailable = ('情景估值｜待更新', None)
+    primary = core_symbols()[1]
+    day = now.astimezone(ET).date()
+    official = voo_fundamentals(path, day) if primary == 'VOO' else None
+    official_detail = 'VOO 估值来源｜Vanguard 季度基金资料 · 情景估值待核实' if official else None
+    unavailable = ('情景估值｜待更新'+('\n'+official if official else ''), official_detail)
     if path is None:
         return unavailable
     try:
         snapshot = json.loads(path.read_text())
-        day = now.astimezone(ET).date()
         holdings_day = date.fromisoformat(snapshot['as_of'])
         market_day = date.fromisoformat(snapshot['market_as_of'])
         available_at = datetime.fromisoformat(snapshot['available_at'])
@@ -161,20 +203,31 @@ def valuation_reference(path, now):
                 and available_at.tzinfo is not None and available_at <= now):
             return unavailable
         centers = []
-        for symbol in ('QQQ','SMH'):
-            row = snapshot['symbols'][symbol]
+        for symbol in (primary,'SMH'):
+            row = snapshot['symbols'].get(symbol)
+            if row is None:
+                if symbol != 'VOO' or not official:
+                    centers.append(f'{symbol} 待核实')
+                continue
             center, coverage = (Decimal(str(row[key])) for key in ('center','cashflow_coverage'))
             if not (center.is_finite() and center>0 and coverage.is_finite() and 85<=coverage<=100):
                 return unavailable
             centers.append(f'{symbol} ${center:.0f}')
+            if symbol == 'VOO':
+                official_detail = None
     except (OSError, ValueError, ArithmeticError, TypeError, KeyError):
         return unavailable
-    return ('情景估值｜'+' · '.join(centers),
-            f'估值依据｜成分股 {holdings_day:%m-%d} · 收盘 {market_day:%m-%d} · 仅报告')
+    summary = '情景估值｜'+(' · '.join(centers) or '待更新')
+    detail = f'估值依据｜成分股 {holdings_day:%m-%d} · 收盘 {market_day:%m-%d} · 仅报告'
+    if official:
+        summary += '\n'+official
+    if official_detail:
+        detail += '\n'+official_detail
+    return summary, detail
 
 
 def decision_notification(result, data_directory, now, *, valuation_path=None):
-    from .price_levels import SYMBOLS as CORE_SYMBOLS, build, render
+    from .price_levels import build, display_symbols, render
 
     lines = []
     period = result.get('slow_ma_period', POLICY.get('slow_ma_period',100))
@@ -192,7 +245,8 @@ def decision_notification(result, data_directory, now, *, valuation_path=None):
     lines.append(f"{funds}｜{usd(result.get('safe_cash'))}")
     lines.append('资金规则｜已核实自有资金' + (
         f' · 每日 {usd(daily_limit)} · 每窗口 {usd(window_limit)}'
-        if daily_limit is not None else ' · 无固定日／窗口额度'))
+        if daily_limit is not None and window_limit is not None else
+        f' · 每日 {usd(daily_limit)}' if daily_limit is not None else ' · 无固定日／窗口额度'))
     if result.get('window_allocation') is not None:
         lines.append('分配｜按目标缺口')
     if result.get('strategy_b_state'):
@@ -236,7 +290,7 @@ def decision_notification(result, data_directory, now, *, valuation_path=None):
     except Exception:
         levels = {}  # Price references are optional even when a decision must be sent.
     references = []
-    for symbol in CORE_SYMBOLS:
+    for symbol in display_symbols():
         row = levels.get('symbols', {}).get(symbol, {})
         if row.get('status') == 'OK':
             references.append(f"{symbol} {usd(row['support'])}/{usd(row['breakout'])}")
@@ -284,7 +338,7 @@ class Observer:
     def __init__(self,path):
         self.db=sqlite3.connect(path,timeout=1,isolation_level=None)
         self.db.executescript('CREATE TABLE IF NOT EXISTS tg_meta(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE IF NOT EXISTS tg_seen(id TEXT PRIMARY KEY,facts TEXT); CREATE TABLE IF NOT EXISTS tg_outbox(key TEXT PRIMARY KEY,body TEXT,state TEXT,message_id INTEGER);')
-    def observe(self,raw,result,at,*,daily_due=False):
+    def observe(self,raw,result,at,*,daily_due=False,covered_fills=(),deferred_fills=()):
         if raw.get('complete_orders') is not True:raise ValueError('notification_orders_incomplete')
         account=raw['account_hash'];bound=self.db.execute("SELECT value FROM tg_meta WHERE key='account'").fetchone()
         if bound and bound[0]!=account:raise ValueError('notification_account_changed')
@@ -301,8 +355,9 @@ class Observer:
                     if known:continue
                     price=Decimal(str(fill['price']));qty=Decimal(str(fill['quantity']));when=datetime.fromisoformat(fill['timestamp'].replace('Z','+00:00'))
                     if not price.is_finite() or not qty.is_finite() or price<=0 or qty<=0 or when.tzinfo is None or when>at or fill.get('currency')!='USD':raise ValueError('notification_fill_invalid')
+                    if not first and key in deferred_fills and key not in covered_fills:continue
                     self.db.execute('INSERT INTO tg_seen VALUES(?,?)',(key,facts))
-                    if not first:self.enqueue('fill:'+key,fill_message(order,fill,raw,trend(result)))
+                    if not first and key not in covered_fills:self.enqueue('fill:'+key,fill_message(order,fill,raw,trend(result)))
             if daily_due:self.enqueue('holdings:'+at.astimezone(ET).date().isoformat(),daily(raw,result,at))
             self.db.execute('COMMIT')
         except BaseException:self.db.execute('ROLLBACK');raise

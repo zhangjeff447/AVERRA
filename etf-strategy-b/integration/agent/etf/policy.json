@@ -1,6 +1,6 @@
 {
   "name": "ETF Agent",
-  "version": "Strategy B v2.0 CORE_SETTLED_CASH",
+  "version": "Strategy B v2.1 CORE_SETTLED_CASH",
   "reference_candidate": "old_uncapped_200_diagnostic",
   "core_symbol": "VOO",
   "sector_defense": true,
@@ -19,7 +19,7 @@
     "TQQQ": "0.00"
   },
   "cash_reserve": "0",
-  "daily_buy_limit": null,
+  "daily_buy_limit": "200.00",
   "per_order_limit": null,
   "broker_minimum": "1.00",
   "fee_buffer": "0.25",
@@ -48,5 +48,5 @@
   "slow_ma_period": 200,
   "tqqq_stop_loss_enabled": false,
   "strategy_b_core_cash": true,
-  "strategy_b_policy_sha256": "14490df9fc14dcc24bfb91e612f01ce7a67c7f266b24d7975d1f6f4ec80d8706"
+  "strategy_b_policy_sha256": "d4d257309eac5cf9da3274521c9668623051018a6edbf83557b6ff0fc0a8f685"
 }

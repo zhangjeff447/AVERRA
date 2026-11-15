@@ -120,8 +120,10 @@ def holdings_report(journal,raw,result,at):
         if unsettled > 0:
             lines.append('TQQQ 待结算 '+usd(unsettled))
         if POLICY.get('daily_buy_limit') is not None:
-            lines.append('买入上限｜每日合计'+usd(POLICY['daily_buy_limit'])+
-                         '／每窗口合计'+usd(POLICY['per_window_buy_limit']))
+            limit = '买入上限｜每日合计'+usd(POLICY['daily_buy_limit'])
+            if POLICY.get('per_window_buy_limit') is not None:
+                limit += '／每窗口合计'+usd(POLICY['per_window_buy_limit'])
+            lines.append(limit)
         from .price_levels import build
         levels = build(ROOT.parent/'data',at)
         references = [f"{symbol} {usd(row['support'])}/{usd(row['breakout'])}"
@@ -150,10 +152,21 @@ def send(text,adapter):
     return dict(state='UNKNOWN',error='MISSING_CONFIRMED_RECEIPT')
 
 
-def drain(store,adapter,sender=send):
+def drain(store,adapter,sender=send,*,at=None):
     # This worker's exclusive file lock proves no previous sender is running.
     store.interrupted_sends()
-    pending=store.db.execute("SELECT key,body FROM outbox WHERE state='PENDING' ORDER BY created_at,key").fetchall()
+    from datetime import timedelta
+    now=at or datetime.now(timezone.utc)
+    pending=[]
+    for row in store.db.execute("SELECT key,body,kind FROM outbox WHERE state='PENDING' ORDER BY created_at,key").fetchall():
+        if row['kind']=='DECISION_DEFERRED':
+            window=row['key'].removeprefix('rf-valuation:')
+            if store.message('rf-window:'+window):
+                store.db.execute("UPDATE outbox SET state='SUPERSEDED' WHERE key=? AND state='PENDING'",(row['key'],))
+                continue
+            if now<datetime.fromisoformat(window).replace(tzinfo=ET)+timedelta(minutes=5):
+                continue
+        pending.append(row)
     if not pending:return
     configure_sender(type('Sender',(),{'adapter':adapter})())  # Before claim: missing credentials cannot send.
     for row in pending:
@@ -224,7 +237,16 @@ def run(root=ROOT,at=None,*,adapter_factory=NativeAdapter,sender=send):
                             from .telegram_reports import Observer
                             observer=Observer(state/'telegram-observation.sqlite')
                             try:
-                                observer.observe(raw,result,at)
+                                from .notifications import window_fills
+                                from .calendar import scheduled
+                                covered=set()
+                                for row in journal.db.execute("SELECT key,value FROM etf_meta WHERE key LIKE 'rf_window_completed:%'"):
+                                    window=row['key'].removeprefix('rf_window_completed:')
+                                    if store.message('rf-window:'+window):
+                                        covered.update(f['key'] for f in json.loads(row['value']).get('window_fills',[]))
+                                slot=scheduled(at)
+                                deferred={f['key'] for f in window_fills(journal,local.date().isoformat()+':'+slot)} if slot else set()
+                                observer.observe(raw,result,at,covered_fills=covered,deferred_fills=deferred)
                                 configure_sender(type('Sender',(),{'adapter':adapter})())
                                 observer.drain(lambda body:sender(body,adapter))
                             finally:observer.db.close()
@@ -239,7 +261,7 @@ def run(root=ROOT,at=None,*,adapter_factory=NativeAdapter,sender=send):
                                 except sqlite3.Error:pass
                             store.fault(key,category(exc));store.event(key,'READ_FAILED',dict(category=category(exc)))
                         finally:journal.db.close()
-            try:drain(store,adapter,sender)
+            try:drain(store,adapter,sender,at=at)
             except Exception as exc:store.fault('notification-worker:'+local.date().isoformat(),category(exc))
             assert not any(c in ('review_equity_order','place_equity_order') for c in adapter.transport.calls)
             return 0

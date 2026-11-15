@@ -100,13 +100,16 @@ class Order:
             raise ValueError('invalid_order_funding_source')
 
 
-def core_envelope(snap, weights, floor, policy):
-    budget = down(min(snap.core_cash,snap.available-D(policy['execution']['cash_buffer'])))
+def core_envelope(snap, weights, floor, policy, *, state=None, daily_remaining=None):
+    spendable = min(snap.core_cash, snap.available-D(policy['execution']['cash_buffer']))
+    budget = down(spendable if daily_remaining is None else min(spendable, daily_remaining))
     available = {s:snap.quantities[s]*snap.prices[s] for s in CORE}
     core = sum(available.values())
     first = down(budget*D(weights[CORE[0]]))
     amounts = {CORE[0]:first,CORE[1]:budget-first}
     for symbol in CORE:
+        if state == 'DEFENSIVE' and symbol == 'SMH' and policy.get('defensive_skip_smh_floor'):
+            continue
         if core and available[symbol]/core < D(floor[symbol]):
             target=D(policy['strategic_core_weights'][symbol])
             needed=max(D(0),(core+budget)*target-available[symbol]).quantize(CENT,rounding=ROUND_UP)
