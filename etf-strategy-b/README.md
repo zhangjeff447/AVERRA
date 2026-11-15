@@ -34,16 +34,25 @@ This folder contains the strategy, the offline backtest entry point, and the int
 
 The simulation uses the previous session's signal and fills at the next session's open, with 5 bps slippage per side. Results are hypothetical and do not include live-window execution differences.
 
-| Scenario | v2.0 final value / max drawdown | v2.1 final value / max drawdown |
-| --- | ---: | ---: |
-| 2013-01-02 → 2026-11-11, $10,000 start + $400/month | $771,312 / 41.10% | $776,956 / 41.22% |
-| 2013 → 2026-11, $1,450 start (20/80) + $100/week | $625,559 / 41.03% | $623,317 / 41.01% |
-| 2021 → 2026-11, $1,450 start (20/80) + $100/week | $82,712 / 39.41% | $79,085 / 37.40% |
-| **Stress test** 2001-03-21 → 2012-12-31, $1,450 + $100/week ¹ | $73,017 / 63.29% | $73,869 / 59.12% |
+Each cell shows **final value / maximum drawdown**. All four columns use the same engine, data, costs, deposits and starting portfolio. The DCA columns split every deposit at a fixed ratio, with no regime rules, no floors and no daily cap. They are also buy-only.
 
-¹ SPY stands in for VOO, which launched in 2010. Early SMH history is spliced from Semiconductor HOLDRS, which converted 1:1 into the current ETF in 2011. The CAGR over this period was 0.06% for v2.0 and 0.72% for v2.1.
+| Scenario | v2.0 | v2.1 | DCA SMH 80% / VOO 20% | DCA SMH 50% / VOO 50% |
+| --- | ---: | ---: | ---: | ---: |
+| 2013-01-02 → 2026-11-11, $10,000 start + $400/month | $771,312 / 41.10% | $776,956 / 41.22% | **$912,116** / 43.23% | $668,888 / **38.90%** |
+| 2013 → 2026-11, $1,450 start (20/80) + $100/week | $625,559 / 41.03% | $623,317 / 41.01% | **$720,309** / 43.10% | $545,606 / **38.87%** |
+| 2021 → 2026-11, $1,450 start (20/80) + $100/week | $82,712 / 39.41% | $79,085 / 37.40% | **$87,975** / 41.32% | $75,626 / **36.40%** |
+| **Stress test** 2001-03-21 → 2012-12-31, $1,450 start (20/80) + $100/week ¹ | $73,017 / 63.29% | $73,869 / 59.12% | $70,970 / 66.81% | **$76,875** / **58.72%** |
 
-**Read the stress test.** The portfolio holds roughly 80–85% semiconductors. In a semiconductor bear market like 2000–2002, the regime rules soften the drawdown, but the strategy can still lose more than half its value and take many years to recover. The 2013–2026 results come from an exceptional period for semiconductors.
+¹ SPY stands in for VOO, which launched in 2010. Early SMH history is spliced from Semiconductor HOLDRS, which converted 1:1 into the current ETF in 2011. CAGR over this period: v2.0 0.06%, v2.1 0.72%, DCA 80/20 −0.68%, DCA 50/50 1.02%.
+
+**How to read this table.**
+- **2013–2026:** plain 80/20 DCA beat v2.1's final value by about 11–17%, with a drawdown about 2 points deeper. Strategy B's regime rules move new cash toward VOO in weak markets. That cost return during the long semiconductor bull market.
+- **2001–2012:** the same rules paid off. v2.1 ended above 80/20 DCA with a drawdown about 8 points shallower.
+- **DCA 50/50** had the lowest drawdown in every period and the best result in the stress test, but the lowest final value from 2013 onward.
+
+In short, Strategy B is insurance against a semiconductor bust, paid for with return in semiconductor bull markets.
+
+**The stress test in particular.** Strategy B holds roughly 80–85% semiconductors. In a semiconductor bear market like 2000–2002, the regime rules soften the drawdown, but the strategy can still lose more than half its value and take many years to recover. The 2013–2026 results come from an exceptional period for semiconductors.
 
 Research notes from the same review: adding more intraday buy windows, splitting deposits across days, dip-waiting rules and machine-learning allocators were all tested. None improved the final value consistently out of sample. Even perfect foresight of each day's low adds only about +0.85% over ten years.
 
