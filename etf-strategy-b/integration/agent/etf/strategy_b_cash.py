@@ -7,6 +7,7 @@ from strategy_b.planner import Frame, Snapshot, core_envelope
 from strategy_b.policy import CORE, D, SYMBOLS, load_policy
 from strategy_b.signals import Signal, signals
 
+from .buy_limits import core_daily_remaining
 from .calendar import ET, previous_session
 from .cycle import POLICY, authorize_order, down, money
 
@@ -54,7 +55,8 @@ def plan(snapshot, signal, journal, *, now, exclude_intent=None, risk_only=False
         raise ValueError('signal_session_stale')
     safe = down(money(snapshot['safe_cash']))
     minimum = money(POLICY['broker_minimum'])
-    key = 'strategy_b_core_allocation:' + day
+    daily = core_daily_remaining(journal,now,exclude_intent=exclude_intent)
+    key = 'strategy_b_v21_core_allocation:' + day
     saved = journal.load(key)
     if saved is None:
         frame = Frame(0, day, signal['date'], now, now,
@@ -62,9 +64,10 @@ def plan(snapshot, signal, journal, *, now, exclude_intent=None, risk_only=False
         quantities = {s: money(snapshot['quantities'][s]) for s in SYMBOLS}
         snap = Snapshot(frame, money(snapshot['net_assets']), safe+D(cfg['execution']['cash_buffer']),
                         safe, D(0), quantities, D(0), D(0))
-        budgets = core_envelope(snap, result['cash_weights'], cfg['core_floor'], cfg)
+        budgets = core_envelope(snap, result['cash_weights'], cfg['core_floor'], cfg,
+                                state=result['phase'], daily_remaining=daily)
         saved = dict(policy_version=POLICY['version'], signal_date=signal['date'], state=result['phase'],
-                     budget=str(safe), amounts={s:str(amount) for s,amount in budgets.items()})
+                     budget=str(sum(budgets.values())), amounts={s:str(amount) for s,amount in budgets.items()})
         if not risk_only and persist_allocation and any(value >= minimum for value in budgets.values()):
             with journal.transaction():
                 journal.save(key, saved)
@@ -75,14 +78,15 @@ def plan(snapshot, signal, journal, *, now, exclude_intent=None, risk_only=False
     if sum(budgets.values()) != money(saved['budget']) or any(value != down(value) for value in budgets.values()):
         raise ValueError('strategy_b_allocation_invalid')
     result.update(selected=None, safe_cash=str(safe), net_assets=str(snapshot['net_assets']),
-                  core_allocation=saved['amounts'], reason='WAIT_STOP_NOT_TRIGGERED' if risk_only
+                  core_allocation=saved['amounts'], daily_buy_remaining=str(daily),
+                  reason='WAIT_STOP_NOT_TRIGGERED' if risk_only else 'WAIT_DAILY_BUY_LIMIT' if daily < minimum
                   else 'WAIT_STRATEGY_B_CASH' if safe < minimum else 'WAIT_STRATEGY_B_NO_CORE_ORDER')
     if risk_only:
         return result
     for symbol in CORE:
         reason = 'STRATEGY_B_CORE_CASH'
         decision_id = ':'.join((day, symbol, 'BUY', reason))
-        amount = down(min(budgets[symbol], safe))
+        amount = down(min(budgets[symbol], safe, daily))
         if amount < minimum or journal.action_used(decision_id, exclude_intent=exclude_intent):
             continue
         authorize_order(symbol, 'BUY')

@@ -34,7 +34,7 @@ def bars(frames,rates):
 
 
 def run(history, qq, policy, costs, *, start, end, variant, seed=D('10000'), monthly=D('400'),
-        tactical_fraction=D('.10'), book=None):
+        tactical_fraction=D('.10'), book=None, weekly=None, initial_core=None, daily_limit=None):
     if variant not in ('VOO','CORE_80_20','B_CORE','B_FULL'):
         raise ValueError('unknown_variant')
     wallet=book.account() if book else Wallet()
@@ -42,7 +42,7 @@ def run(history, qq, policy, costs, *, start, end, variant, seed=D('10000'), mon
     signal_map=signals(qq,policy['market'])
     dates=list(history)
     rows=[]
-    prior_month=None
+    prior_period=None
     for i,day in enumerate(dates):
         if not start<=day<=end:
             continue
@@ -57,9 +57,11 @@ def run(history, qq, policy, costs, *, start, end, variant, seed=D('10000'), mon
         ref_close=history[prior].closed['TQQQ']/bar.splits['TQQQ']
         opening=Frame(i,day,prior,opened,opened,bar.opened,ref_close)
         closing=Frame(i,day,prior,closed,closed,bar.closed,ref_close)
-        deposit=seed if not rows else monthly if day[:7]!=prior_month else D(0)
+        period = date.fromisoformat(day).isocalendar()[:2] if weekly is not None else day[:7]
+        contribution = monthly if weekly is None else weekly
+        deposit = seed if not rows else contribution if period != prior_period else D(0)
         tactical_seed=deposit*tactical_fraction if variant=='B_FULL' and not rows else D(0)
-        prior_month=day[:7]
+        prior_period=period
         due=i+(1 if day>='2024-05-28' else 2 if day>='2017-09-05' else 3)
 
         def open_account(account):
@@ -78,6 +80,11 @@ def run(history, qq, policy, costs, *, start, end, variant, seed=D('10000'), mon
                     account.dividend(symbol,bar.dividends[symbol],i+10,costs)
             if deposit:
                 account.deposit(deposit,tactical_seed)
+            if not rows and initial_core is not None:
+                for symbol, weight in initial_core.items():
+                    amount = deposit * weight
+                    account.holdings[symbol] = amount / bar.opened[symbol]
+                    account.pockets['external_core'] -= amount
             snap=account.snapshot(opening,policy)
             if variant=='B_FULL':
                 assess(signal,snap,account.risk,policy)
@@ -102,7 +109,8 @@ def run(history, qq, policy, costs, *, start, end, variant, seed=D('10000'), mon
                 wallet=book.account()
             else:
                 wallet.fill(order,order.quantity,snap,costs,policy,due,limits)
-            orders.append(dict(symbol=order.symbol,side=order.side,reason=order.reason,shares=float(order.quantity)))
+            orders.append(dict(symbol=order.symbol,side=order.side,reason=order.reason,shares=float(order.quantity),
+                               gross=float(order.quantity*costs.price(opening.prices[order.symbol],order.side))))
 
         snap=wallet.snapshot(opening,policy)
         limits=assess(signal,snap,wallet.risk,policy) if variant=='B_FULL' else None
@@ -112,7 +120,8 @@ def run(history, qq, policy, costs, *, start, end, variant, seed=D('10000'), mon
         weights=({'VOO':'1','SMH':'0'} if variant=='VOO' else policy['strategic_core_weights']
                  if fixed else policy['states'][signal.state]['new_core_cash'])
         floor=dict.fromkeys(CORE,'0') if fixed else policy['core_floor']
-        envelopes=core_envelope(snap,weights,floor,policy)
+        envelopes=core_envelope(snap,weights,floor,policy,state=signal.state,daily_remaining=daily_limit)
+        cap_bound = daily_limit is not None and snap.core_cash > daily_limit + D(policy['execution']['cash_buffer'])
         if tactic and tactic.side=='SELL':
             # Complete higher-priority risk reduction before accepting core
             # orders on a later observation.
@@ -143,7 +152,7 @@ def run(history, qq, policy, costs, *, start, end, variant, seed=D('10000'), mon
         rows.append(dict(date=day,nav=float(nav),unit=float(wallet.account.index),deposit=float(deposit),
             cash=float(sum(wallet.pockets.values())),tqqq_weight=float(weight),state=signal.state,
             signal_date=prior,benchmark_rate=float(bar.rate),risk_flags=list(flags),orders=orders,
-            core_envelope={s:float(x) for s,x in envelopes.items()},
+            core_envelope={s:float(x) for s,x in envelopes.items()}, cap_bound=cap_bound,
             tactical_target=float(limits.target) if limits else 0,
             tactical_cap=float(limits.cap) if limits else 0))
     return rows,wallet

@@ -1,12 +1,14 @@
 # Averra
 
-Averra 收录 ETF 策略研究、历史回测和美股筛选 Agent 的源码与说明。
+Averra collects the source code and documentation for ETF strategy research, historical backtests and a US stock screening agent.
 
-| 项目 | 简介 |
+| Project | Summary |
 | --- | --- |
-| [Strategy B v2.0](etf-strategy-b/) | VOO／SMH 核心仓策略。用已结算的可用自有现金按市场状态分配，附离线回测与待切换候选源码。 |
-| [ETF Trend Agent](etf-trend-agent/) | ETF 趋势策略与执行参考。 |
-| [ETF Steady Agent](etf-steady-agent/) | 偏保守的 ETF 策略版本。 |
-| [Stock Agent](stock-agent/) | 美股筛选与监控。 |
+| [Strategy B v2.1](etf-strategy-b/) | Buy-only VOO / SMH core strategy. Allocates settled, unleveraged own cash by market regime, with a $200 daily buy cap. Includes the offline backtest and the release-candidate integration source. |
+| [ETF Trend Agent](etf-trend-agent/) | ETF trend strategy and execution reference. |
+| [ETF Steady Agent](etf-steady-agent/) | A more conservative ETF strategy variant. |
+| [Stock Agent](stock-agent/) | US stock screening and monitoring. |
 
-各目录提供对应规则、版本状态和运行方法。[仓库指南](REPOSITORY_GUIDE.md)
+Each folder documents its rules, version status and how to run it. See the [repository guide](REPOSITORY_GUIDE.md).
+
+Nothing in this repository is investment advice. Backtests are simulations and do not guarantee future results.

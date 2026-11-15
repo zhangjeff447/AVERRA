@@ -1,8 +1,14 @@
 {
   "version": "Strategy B v2.0",
   "mode": "PAPER_ONLY",
-  "strategic_core_weights": {"VOO": "0.20", "SMH": "0.80"},
-  "core_floor": {"VOO": "0.15", "SMH": "0.70"},
+  "strategic_core_weights": {
+    "VOO": "0.20",
+    "SMH": "0.80"
+  },
+  "core_floor": {
+    "VOO": "0.15",
+    "SMH": "0.70"
+  },
   "market": {
     "fast_days": 50,
     "slow_days": 200,
@@ -17,16 +23,59 @@
     "buy_volatility_ceiling": "0.35",
     "strong_buy_volatility_ceiling": "0.25",
     "emergency_volatility": "0.45",
-    "priority": ["DEFENSIVE", "STRONG_BULL", "RISK_ON", "RECOVERY"]
+    "priority": [
+      "DEFENSIVE",
+      "STRONG_BULL",
+      "RISK_ON",
+      "RECOVERY"
+    ]
   },
   "states": {
-    "DEFENSIVE": {"new_core_cash": {"VOO": "0.80", "SMH": "0.20"}, "tqqq_target": "0", "tqqq_cap": "0"},
-    "RECOVERY": {"new_core_cash": {"VOO": "0.50", "SMH": "0.50"}, "tqqq_target": "0", "tqqq_cap": "0.05"},
-    "RISK_ON": {"new_core_cash": {"VOO": "0.30", "SMH": "0.70"}, "tqqq_target": "0.05", "tqqq_cap": "0.10"},
-    "STRONG_BULL": {"new_core_cash": {"VOO": "0.10", "SMH": "0.90"}, "tqqq_target": "0.10", "tqqq_cap": "0.20"}
+    "DEFENSIVE": {
+      "new_core_cash": {
+        "VOO": "0.80",
+        "SMH": "0.20"
+      },
+      "tqqq_target": "0",
+      "tqqq_cap": "0"
+    },
+    "RECOVERY": {
+      "new_core_cash": {
+        "VOO": "0.50",
+        "SMH": "0.50"
+      },
+      "tqqq_target": "0",
+      "tqqq_cap": "0.05"
+    },
+    "RISK_ON": {
+      "new_core_cash": {
+        "VOO": "0.30",
+        "SMH": "0.70"
+      },
+      "tqqq_target": "0.05",
+      "tqqq_cap": "0.10"
+    },
+    "STRONG_BULL": {
+      "new_core_cash": {
+        "VOO": "0.10",
+        "SMH": "0.90"
+      },
+      "tqqq_target": "0.10",
+      "tqqq_cap": "0.20"
+    }
   },
   "risk": {
-    "priority": ["ACCOUNT_REVIEW", "TACTICAL_LIQUIDATION", "QQQ_BELOW_MA200", "VOLATILITY_EMERGENCY", "TQQQ_TRAILING_STOP", "ABSOLUTE_CAP", "STATE_CAP", "QQQ_MA50_HALF", "BUY_RESTRICTIONS"],
+    "priority": [
+      "ACCOUNT_REVIEW",
+      "TACTICAL_LIQUIDATION",
+      "QQQ_BELOW_MA200",
+      "VOLATILITY_EMERGENCY",
+      "TQQQ_TRAILING_STOP",
+      "ABSOLUTE_CAP",
+      "STATE_CAP",
+      "QQQ_MA50_HALF",
+      "BUY_RESTRICTIONS"
+    ],
     "absolute_tqqq_cap": "0.20",
     "below_ma50_days": 3,
     "below_ma50_reduction": "0.50",
@@ -39,5 +88,10 @@
     "strong_step_nav": "0.05",
     "strong_step_spacing_sessions": 5
   },
-  "execution": {"minimum_notional": "1.00", "cash_buffer": "0.25", "max_quote_age_seconds": 60}
+  "execution": {
+    "minimum_notional": "1.00",
+    "cash_buffer": "0.25",
+    "max_quote_age_seconds": 60
+  },
+  "defensive_skip_smh_floor": true
 }
